@@ -8,15 +8,28 @@ import reconstruct
 import V_odom
 
 sequence = '00'
-seq_dir = 'Datasets/KITTI/data_odometry_gray/{}/'.format(sequence)
-dir2 = 'Datasets/KITTI/data_odometry_velodyne/{}/'.format(sequence)
-left_image_files = os.listdir(seq_dir + 'image_0')
-right_image_files = os.listdir(seq_dir + 'image_1')
-velodyne_files = os.listdir(dir2 + 'velodyne/')
-num_frames = 10 #len(left_image_files)
-#self.lidar_path = self.seq_dir + 'velodyne/'
+calib = pd.read_csv('Datasets/KITTI/data_odometry_gray/{}/'.format(sequence)  + 'calib.txt', delimiter=' ', header=None, index_col=0)
 
-calib = pd.read_csv(seq_dir + 'calib.txt', delimiter=' ', header=None, index_col=0)
+os.chdir('/home/vishaal/git/VSLAM/Datasets/KITTI/data_odometry_gray/{}/image_0'.format(sequence))
+lst1 = os.listdir('/home/vishaal/git/VSLAM/Datasets/KITTI/data_odometry_gray/{}/image_0'.format(sequence))
+
+imgL = []
+for filename in lst1:
+   imgL.append(filename)
+imgL.sort()
+img_L = imgL[:len(imgL)]
+
+os.chdir('/home/vishaal/git/VSLAM/Datasets/KITTI/data_odometry_gray/{}/image_1'.format(sequence))
+lst2 = os.listdir('/home/vishaal/git/VSLAM/Datasets/KITTI/data_odometry_gray/{}/image_1'.format(sequence))
+
+imgR = []
+for filename in lst2:
+   imgR.append(filename)
+
+imgR.sort()
+img_R = imgR[:len(imgR)]
+
+num_frames = len(img_L)
 P0 = np.array(calib.loc['P0:']).reshape((3,4))
 P1 = np.array(calib.loc['P1:']).reshape((3,4))
 Tr = np.array(calib.loc['Tr:']).reshape((3,4))
@@ -55,14 +68,15 @@ trajectory1[0] = T_tot[:3, :]
 for i in range(0,num_frames-1):
     if i%100==0:
        print(i)
-    imgL1 = cv2.imread(seq_dir + 'image_0/' + left_image_files[i],0)
-    imgR1 = cv2.imread(seq_dir + 'image_1/' + right_image_files[i],0)
-    imgL2 = cv2.imread(seq_dir + 'image_0/' + left_image_files[i+1],0)
-    imgR2 = cv2.imread(seq_dir + 'image_1/' + right_image_files[i+1],0)
-    lidar = np.fromfile(dir2 + 'velodyne/' + velodyne_files[i], dtype=np.float32, count=-1).reshape((-1, 4))
-    
-    depth1,points1 = imgto3D(imgL1,imgR1,minv,f,b,u,v)
-    depth2,points2 = imgto3D(imgL2,imgR2,minv,f,b,u,v)  
+    os.chdir('/home/vishaal/git/VSLAM/Datasets/KITTI/data_odometry_gray/{}/image_0'.format(sequence))
+    imgL1 = cv2.imread(img_L[i],0)
+    imgL2 = cv2.imread(img_L[i + 1], 0)
+    os.chdir('/home/vishaal/git/VSLAM/Datasets/KITTI/data_odometry_gray/{}/image_1'.format(sequence))
+    imgR1 = cv2.imread(img_R[i],0)
+    imgR2 = cv2.imread(img_R[i+1],0)
+
+    depth1,points1 = reconstruct.imgto3D(imgL1,imgR1,minv,f,b,u,v)
+    depth2,points2 = reconstruct.imgto3D(imgL2,imgR2,minv,f,b,u,v)
 
     mask = np.zeros(points1[:,:,0].shape, dtype=np.uint8)
     ymax = 376
@@ -73,16 +87,11 @@ for i in range(0,num_frames-1):
     kp1, des1 = det.detectAndCompute(imgL1,mask)
     kp2, des2 = det.detectAndCompute(imgL2,mask)
 
-    matches = FLANN_matcher(des1,des2,2)
+    matches = match.FLANN_matcher(des1,des2,2)
 
-    filter_matches = filter_matches_distance(matches, 0.2)
-    
-    #visualize_matches(imgL1, kp1, imgL2, kp2, filter_matches)
-    render = lidar2img(lidar, 376, 1241, Tr, P0)
-    indices = np.where(render < 3000)
-    depth1[indices] = render[indices]
+    filter_matches = match.filter_matches_distance(matches, 0.3)
 
-    rmat, tvec, image1_points, image2_points = estimate_motion(filter_matches, kp1, kp2, k_left , minv, depth1)
+    rmat, tvec, image1_points, image2_points = V_odom.estimate_motion(filter_matches, kp1, kp2, k_left , minv, depth1)
     #print(rmat,tvec)
     Tmat = np.eye(4)
     Tmat[:3, :3] = rmat
@@ -92,4 +101,5 @@ for i in range(0,num_frames-1):
     #print(Tmat)
     trajectory1[i+1, :, :] = T_tot[:3, :]
 
-plt.plot(trajectory[:, :, 3][:, 0],trajectory[:, :, 3][:, 2])
+plt.plot(trajectory1[:, :, 3][:, 0],trajectory1[:, :, 3][:, 2])
+plt.show()
